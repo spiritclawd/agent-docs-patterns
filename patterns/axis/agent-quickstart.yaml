@@ -1,0 +1,240 @@
+# Axis Agent Quickstart
+# For: Eternum Onchain Game Agent CLI
+# Docs: https://docs.realms.world/development/axis/overview
+
+api:
+  name: Axis
+  version: "1.0.0"
+  description: LLM-driven onchain game agent CLI for Eternum/Realms
+  base_url: "https://github.com/bibliothecadao/eternum"
+  repo: "https://github.com/bibliothecadao/eternum"
+  
+environments:
+  - name: slot
+    description: Development/test environment
+    auth: password or browser
+  - name: sepolia
+    description: Ethereum testnet
+    auth: password or browser  
+  - name: mainnet
+    description: Production environment
+    auth: password or browser
+
+installation:
+  command: |
+    curl -fsSL https://github.com/bibliothecadao/eternum/releases/latest/download/install-axis.sh | bash
+  post_install: |
+    echo "ANTHROPIC_API_KEY=sk-ant-..." >> ~/.eternum-agent/.env
+
+modes:
+  - name: tui
+    command: "axis"
+    use_when: "Running manually on laptop"
+    features:
+      - Interactive world picker
+      - Browser auth
+      - Terminal UI with chat log
+      - Keyboard control
+      
+  - name: headless
+    command: "axis run --headless --world=<name>"
+    use_when: "VPS, CI, fleet orchestration"
+    features:
+      - NDJSON to stdout
+      - HTTP API control
+      - stdin commands
+      - SSE streaming
+
+endpoints:
+  - name: world_discovery
+    description: Discover active game worlds
+    method: CLI
+    command: "axis discover"
+    output:
+      type: json
+      fields:
+        - name: world_name
+          type: string
+        - name: chain
+          type: string
+        - name: status
+          type: string
+    example_output: |
+      [
+        {"name": "eternum-slot-1", "chain": "slot", "status": "active"},
+        {"name": "eternum-sepolia", "chain": "sepolia", "status": "active"}
+      ]
+
+  - name: agent_tick
+    description: Main LLM tick loop - observe state and execute actions
+    method: INTERNAL
+    trigger: "Automatic (configurable interval)"
+    inputs:
+      - name: game_state
+        type: ContractState
+        description: Current onchain game state
+      - name: agent_memory
+        type: JSON
+        description: Persisted memory from previous ticks
+    outputs:
+      - name: actions
+        type: Transaction[]
+        description: Onchain actions to execute
+      - name: memory_update
+        type: JSON
+        description: Updated memory to persist
+
+  - name: http_control
+    description: HTTP API for headless control
+    method: HTTP
+    base_path: "http://localhost:3000"
+    endpoints:
+      - path: /status
+        method: GET
+        description: Get current agent status
+      - path: /command
+        method: POST
+        description: Send command to agent
+        body: { "command": "string", "params": "object" }
+      - path: /actions
+        method: GET
+        description: List recent actions
+      - path: /memory
+        method: GET
+        description: Get agent memory
+      - path: /memory
+        method: POST
+        description: Update agent memory
+
+error_codes:
+  - code: AUTH_FAILED
+    message: "Authentication failed"
+    action: "Check credentials in ~/.eternum-agent/.env"
+    retry: false
+    
+  - code: WORLD_NOT_FOUND
+    message: "World does not exist or is inactive"
+    action: "Run 'axis discover' to find active worlds"
+    retry: false
+    
+  - code: INSUFFICIENT_RESOURCES
+    message: "Not enough in-game resources for action"
+    action: "Wait for resource generation or gather resources first"
+    retry: true
+    retry_after: 60
+    
+  - code: TX_REVERTED
+    message: "Transaction reverted on-chain"
+    action: "Check game rules - action may be invalid given current state"
+    retry: false
+    
+  - code: RATE_LIMITED
+    message: "Too many requests to LLM provider"
+    action: "Increase tick interval or use different provider"
+    retry: true
+    retry_after: 60
+
+capabilities:
+  - name: observe_state
+    description: Read current game state from contracts
+    auto_generated: true
+    source: Contract ABIs
+    
+  - name: execute_actions
+    description: Submit transactions to game contracts
+    auto_generated: true
+    source: Contract ABIs
+    
+  - name: persist_memory
+    description: Store and retrieve agent memory across ticks
+    storage: "~/.eternum-agent/memory/<world>/"
+    
+  - name: llm_reasoning
+    description: Use LLM to decide actions from game state
+    providers:
+      - anthropic
+      - openai
+    config: "~/.eternum-agent/.env"
+
+game_concepts:
+  realms:
+    description: Player-owned territories that produce resources
+    actions:
+      - claim_realm
+      - build_structure
+      - recruit_army
+      
+  resources:
+    types:
+      - food
+      - wood
+      - stone
+      - iron
+      - gold
+      - lords
+    production: "Per-tick based on realm improvements"
+    
+  combat:
+    description: Armies can attack other realms
+    mechanics: "Rock-paper-scissors unit types"
+    
+  victory:
+    conditions:
+      - "Control X% of worlds"
+      - "Accumulate Y resources"
+      - "Last realm standing"
+
+example_tick_flow: |
+  1. Fetch current game state (realm positions, resources, armies)
+  2. Load agent memory (previous strategy, ongoing plans)
+  3. LLM analyzes state and decides actions:
+     - "Build farm on realm X (costs 50 wood)"
+     - "Move army from X to Y"
+     - "Attack enemy realm Z"
+  4. Execute actions as transactions
+  5. Update memory with new strategy
+  6. Sleep until next tick
+
+agent_strategies:
+  - name: resource_optimizer
+    description: Maximize resource production efficiency
+    focus: ["build_farms", "upgrade_mines", "trade"]
+    
+  - name: expansionist
+    description: Rapidly expand territory
+    focus: ["claim_realms", "recruit_armies", "attack"]
+    
+  - name: diplomat
+    description: Form alliances and trade
+    focus: ["communicate", "trade", "defend"]
+    
+  - name: turtle
+    description: Heavy defense, wait for others to fight
+    focus: ["fortify", "stockpile", "counter_attack"]
+
+configuration:
+  file: "~/.eternum-agent/config.yaml"
+  schema:
+    tick_interval_ms:
+      type: integer
+      default: 30000
+      description: Milliseconds between ticks
+    llm_provider:
+      type: string
+      default: "anthropic"
+      enum: ["anthropic", "openai"]
+    llm_model:
+      type: string
+      default: "claude-3-sonnet"
+    max_actions_per_tick:
+      type: integer
+      default: 5
+    memory_size_limit:
+      type: integer
+      default: 10000
+      description: Max characters in agent memory
+
+requirements:
+  - "Anthropic API key or OpenAI API key"
+  - "Cartridge Controller account (for auth)"
+  - "Starknet wallet with ETH for gas (mainnet/sepolia)"
